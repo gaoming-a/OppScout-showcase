@@ -2,7 +2,7 @@
 
 > Evidence-grounded product opportunity research system · 产品机会研究与证据化决策系统
 
-[30 秒演示](assets/oppscout-product-promo-30s.mp4) · [系统架构](docs/architecture.md) · [评测方法与结果](docs/evaluation.md)
+[系统架构](docs/architecture.md) · [评测方法与结果](docs/evaluation.md)
 
 ![OppScout 工作台](assets/oppscout-home.png)
 
@@ -90,5 +90,5 @@ OppScout 由我独立完成产品定义和核心系统实现，主要工作包�
 ## 公开边界
 
 - 本仓库不包含生产源码、原始平台数据、Cookie、API Key、Prompt、数据库快照或部署地址。
-- 图片与视频中的内容用于说明产品交互和工程设计，不授权作为数据集或生产素材再分发。
+- 图片中的内容用于说明产品交互和工程设计，不授权作为数据集或生产素材再分发。
 - 如需了解实现细节，可从[系统架构](docs/architecture.md)和[评测说明](docs/evaluation.md)开始；面试中可进一步演示私有仓库中的代码与原始评测报告。
