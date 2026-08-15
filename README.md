@@ -42,20 +42,22 @@ OppScout 面向早期产品负责人、创业者、需求研究人员与 AI 产�
 ## 端到端链路
 
 ```mermaid
-flowchart LR
-    A["研究方向与项目背景"] --> B["Intent / Retrieval Planner"]
-    B --> C["多平台 Agentic 采集"]
-    C --> D["PostgreSQL 事实层"]
-    D --> E["FTS + BGE-M3 / pgvector"]
-    E --> F["RRF Top-50"]
-    F --> G["BGE Reranker Top-10"]
-    G --> H["Deterministic Evidence Fit"]
-    H --> I["DeepResearch Loop"]
-    I --> J["固定专家 + 领域专家"]
-    J --> K["ProductSpec / 评分 / 反证"]
-    K --> L["带引用报告与决策产物"]
-    L -.证据缺口.-> I
+flowchart TB
+    A["01 理解研究问题<br/>Intent · Query Planner"]
+    B["02 建立证据底座<br/>多平台采集 · Hybrid RAG · Evidence Fit"]
+    C["03 自主研究与专家评审<br/>DeepResearch · 补检 · 反证 · 评分"]
+    D["04 生成决策产物<br/>引用报告 · ProductSpec · 机会卡"]
+
+    A --> B --> C --> D
+    C -. "证据不足：返回补检" .-> B
 ```
+
+| 阶段 | 核心组件 | 阶段输出 |
+| --- | --- | --- |
+| 01 理解问题 | Intent、Retrieval Planner | 研究边界、查询族与证据目标 |
+| 02 证据生产 | 多平台采集、PostgreSQL、FTS/BGE-M3、RRF、Reranker、Evidence Fit | 可引用 Evidence Bundle 与检索审计 |
+| 03 研究评审 | DeepResearch、领域专家、固定专家、两轮讨论 | 带引用研究结论、风险、反证与评分 |
+| 04 决策输出 | ProductSpec、确定性质量门、Artifact Generator | 产品机会、继续验证或不建议推进 |
 
 详细状态机、Agent 边界和失败恢复策略见[系统架构](docs/architecture.md)。
 
