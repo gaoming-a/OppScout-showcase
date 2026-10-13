@@ -1,9 +1,9 @@
-# 公开作品说明
+# 作品说明
 
-本仓库仅包含 OppScout 的求职展示文档与已有界面素材。
+本仓库用于展示 OppScout 的功能、真实研究案例与个人贡献，项目源码保持私有。
 
-项目源码、内置 Prompt、原始平台数据、模型调用记录、凭据、数据库快照、部署配置和私有运行记录保持私有。设计说明不提供上述材料的访问权限。
+界面截图由浏览器在本地最新版中实际操作采集，具体案例与截图时间见真实运行 SOP。架构图为图像生成工具制作的功能示意。
 
-界面截图是带日期的历史演示，用于说明产品交互；不授权将图片及其中内容作为数据集或生产素材再分发。
+简历中的项目累计成果与本次单次运行演示分别标注。原始数据、完整简历、内置 Prompt、凭据及部署配置不在公开仓库中。
 
-This repository is a documentation-only portfolio showcase. The implementation and private operational data remain private. No license is granted to redistribute the included screenshots as a dataset or production asset.
+截图仅用于项目介绍，不授权作为数据集或生产素材再分发。
