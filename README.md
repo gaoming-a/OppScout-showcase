@@ -1,96 +1,91 @@
 # OppScout
 
-> Evidence-grounded product opportunity research system · 产品机会研究与证据化决策系统
+**面向情报研究的 Agent 平台 · Intelligence Research with an Explicit Agent Runtime**
 
-[系统架构](docs/architecture.md) · [评测方法与结果](docs/evaluation.md)
+把研究问题组织成可追溯的证据、研究过程和决策产物，并逐步用专用 Intel Harness 承载机会研究、舆情研究与风格专家三类能力。
 
-![OppScout 工作台](assets/oppscout-home.png)
+[系统架构](docs/architecture.md) · [界面演示](docs/demo.md) · [评测结果](docs/evaluation.md) · [工程案例](docs/engineering-notes.md) · [作者主页](https://github.com/gaoming-a)
 
-OppScout 面向早期产品负责人、创业者、需求研究人员与 AI 产品团队，把一个研究方向转换为可追溯的研究任务、证据链、多角色评审和结构化决策产物。它不把普通搜索结果直接包装成结论，而是要求每个关键判断都能回到原始内容、来源链接或证据 ID。
+![OppScout 研究工作台，历史版本界面](assets/oppscout-home.png)
 
-这个仓库是面向招聘与技术交流的脱敏项目案例。生产源码、原始平台数据、Prompt、凭据和部署配置保持私有；这里公开系统设计、产品界面、评测口径和本人贡献。
+> 本仓库是求职与技术交流用的公开作品展示。源码仓库保持私有；这里提供经过整理的设计说明、历史界面与评测摘要。内容核对日期：**2026-10-13**。截图来自 2026 年 8 月，当前开发版本与截图及历史部署版本分别说明。
 
-## 一眼看懂项目
+## 项目解决什么问题
 
-| 问题 | OppScout 的处理方式 |
-| --- | --- |
-| 用户只给出模糊方向 | Agent 识别研究主体、决策目标和产品边界，拆分查询族与证据通道 |
-| 多平台信息分散、重复且噪声高 | 采集 B 站、抖音、微博、知乎和小红书的公开内容，规范化后写入 PostgreSQL 事实层 |
-| 单路检索容易漏证据 | PostgreSQL FTS 与 BGE-M3/pgvector 并行召回，RRF 融合后由 BGE Reranker 重排 |
-| 模型容易把相关内容当作可用证据 | deterministic evidence-fit 再检查主题、人群、场景、来源类型和权威性 |
-| 一轮搜索无法闭合研究问题 | DeepResearch 执行 `plan → search → read → reflect → revise/write`，根据证据缺口补检 |
-| 单个 Agent 容易确认偏误 | 需求、市场、供给、合规及领域专家进行补检、反证、分歧讨论和结构化评分 |
-| 研究过程难复盘 | 保存任务状态、检索审计、证据引用、专家发言和最终决策产物 |
+用户给出一个研究方向后，系统需要找到足够的资料、判断资料能支持什么、识别缺口，再形成可核查的结论。单次搜索加总结难以覆盖这个过程，也难以处理长任务中的失败、重复执行与多人使用。
 
-## 已验证结果
+OppScout 从产品机会研究出发，整合公开内容采集、混合检索、DeepResearch、固定角色评审和决策产物；当前进一步加入独立舆情研究、账号与用户隔离、可复用风格专家，以及 Harness 控制合同。
 
-以下数字来自 2026-08-08 至 2026-08-15 的锁定评测和真实运行记录；完整统计边界见[评测说明](docs/evaluation.md)。
+## 对 Agent 开发最有代表性的工作
 
-| 证据 | 结果 |
-| --- | ---: |
-| 500 条历史已知来源查询，生产等权 RRF Top-50 | **83.8% Hit@50** |
-| RRF 相比 vector-only 的 query-macro known-source recall | **+2.28 个百分点**，95% CI `[0.98, 3.76]` |
-| 36 条锁定查询、1,412 个双人标注候选 | Reranker Top-10 来源组覆盖 **94.33%** |
-| deterministic evidence-fit | 条件精确率 **100%**；wrong-domain / authority-mismatch 误放均为 **0** |
-| 最近一次完整候选成功链 | **28 分 30 秒**，22 次 LLM 调用，完成两轮 10 次专家发言并生成机会卡 |
-| 最近一次完整仓库回归 | **1,197 passed / 17 skipped** |
+| 工作 | 具体实现 | 工程价值 |
+| --- | --- | --- |
+| 自研 Runtime | 任务状态机、独立 Worker、租约与 fencing、阶段预算、取消及恢复 | 明确执行所有权，避免超时或重启后重复提交 |
+| Tool / Skill 合同 | 类型化工具入口、输入校验、调用幂等、Skill 版本与内容快照 | 研究能力可以扩展，同时保持输入和权限边界 |
+| Agentic RAG | PostgreSQL FTS + BGE-M3 / pgvector 并行召回，RRF 与 BGE Reranker | 将候选召回、排序和证据准入分别验证 |
+| DeepResearch | plan → search → read → reflect → write，按证据缺口补检 | 用可读取的原始来源支撑结论，保留未解决的缺口 |
+| 专家资产 | 语言习惯提取、确定性规则编译、独立知识范围与多轮评测 | 防止人物语料中的故事和数字成为新问题的事实依据 |
+| 多用户与交互 | 邮箱认证、owner 数据隔离、同会话流去重、SSE / NDJSON | 让研究过程可以持续查看、追问与回溯 |
 
-这些结果刻意区分候选召回、来源组覆盖和证据准入：Reranker 负责排序，不拥有证据准入权；500-query known-source 评测也不把未观察到的结果当成负例。
+统一 Harness 当前完成了合同、控制存储和部分业务恢复切片；完整 Tool Adapter 生命周期、跨进程统一配额和 Artifact Graph 仍在后续阶段。详见[架构与实现边界](docs/architecture.md)。
 
-![OppScout 检索与证据质量摘要](assets/evaluation-summary.png)
-
-## 端到端链路
+## 三类研究能力
 
 ```mermaid
-flowchart TB
-    A["01 理解研究问题<br/>Intent · Query Planner"]
-    B["02 建立证据底座<br/>多平台采集 · Hybrid RAG · Evidence Fit"]
-    C["03 自主研究与专家评审<br/>DeepResearch · 补检 · 反证 · 评分"]
-    D["04 生成决策产物<br/>引用报告 · ProductSpec · 机会卡"]
-
-    A --> B --> C --> D
-    C -. "证据不足：返回补检" .-> B
+flowchart LR
+    U["研究问题 / 对话"] --> I["身份、输入与工具调用校验"]
+    I --> O["机会研究"]
+    I --> P["舆情研究"]
+    I --> E["风格专家蒸馏"]
+    O --> O1["证据检索 → DeepResearch → 四角色评审"]
+    O1 --> O2["产品机会 / 继续验证 / 不建议推进"]
+    P --> P1["公开样本检索 → 逐条引用 → 舆情报告"]
+    E --> E1["语料观察 → 风格规则 → 多轮评测"]
+    E1 --> E2["私有待审核资产"]
 ```
 
-| 阶段 | 核心组件 | 阶段输出 |
+- **机会研究**：对用户问题、市场、供给和合规分别组织证据，形成正式规格、评审和决策产物。
+- **舆情研究**：描述本次检索到的公开样本，校验时效和逐条引用，保留来源与样本边界。
+- **风格专家**：提取有来源支持的表达与互动习惯，领域事实由独立知识检索提供；通过自动评测后仍需人工审核。
+
+三类能力保留各自的业务状态与质量门，当前没有把它们强行合并成一个通用工作流。
+
+## 可以核查的结果
+
+| 评测与日期 | 结果 | 解释边界 |
 | --- | --- | --- |
-| 01 理解问题 | Intent、Retrieval Planner | 研究边界、查询族与证据目标 |
-| 02 证据生产 | 多平台采集、PostgreSQL、FTS/BGE-M3、RRF、Reranker、Evidence Fit | 可引用 Evidence Bundle 与检索审计 |
-| 03 研究评审 | DeepResearch、领域专家、固定专家、两轮讨论 | 带引用研究结论、风险、反证与评分 |
-| 04 决策输出 | ProductSpec、确定性质量门、Artifact Generator | 产品机会、继续验证或不建议推进 |
+| 2026-08-10：500 条历史已知来源查询 | 等权 RRF **83.8% Hit@50**；macro known-source recall 相对 vector-only **+2.28 个百分点** | 已知来源召回，非全库相关性准确率；融合前排序指标存在下降 |
+| 2026-08-08：36 条锁定查询、1,412 个人工双标签候选 | Reranker Top-10 来源组覆盖 **94.33%**；evidence-fit 条件精确率 **100%** | 仅适用于审核候选池和指定准入口径 |
+| 2026-10-13：一次真实风格专家验收 | **33 个来源、8/8 三轮用例通过**，草稿登记完成 | 单次自动评测；资产待人工审核，不能代表总体成功率或完整人格 |
 
-详细状态机、Agent 边界和失败恢复策略见[系统架构](docs/architecture.md)。
+[评测说明](docs/evaluation.md)同时保留 CPU 延迟、排序损失、当前 CI 状态和未完成的验收。公开摘要不提供原始语料、模型对话记录或内部运行标识。
 
-## 产品界面
+## 我的工作
 
-研究过程被投影为连续文档，而不是多张互相割裂的 Agent 消息卡。用户可以查看 DeepResearch 正文、原始来源、证据引用、专家分歧和最终决策，并在同一研究上下文中继续追问。
+本人负责产品定义与核心实现，工作覆盖：
 
-![DeepResearch 与引用证据](assets/oppscout-research-document.png)
+- 将研究需求拆解为证据、研究、评审和产物合同，组织 API、Worker、数据库和前端之间的职责。
+- 整合公开内容采集与标准化管线，处理查询预算、去重、评论分页和来源追溯。
+- 实现任务状态、候选编排、预算、取消、暂停恢复、阶段事件及 PostgreSQL 租约控制。
+- 实现混合检索、来源组去重、证据准入、DeepResearch 与固定角色评审。
+- 实现账号与所有权隔离、统一对话入口、专家资产和带引用的流式追问。
+- 建设 Next.js 研究工作台、Docker 部署链路、分组回归、真实数据库验证和离线评测。
 
-最终结果分为产品机会、继续验证和不建议推进三类结构化产物，避免把证据不足的方向强行包装成产品机会。
-
-![结构化决策产物](assets/oppscout-decision-artifact.png)
-
-## 我的贡献
-
-OppScout 由我独立完成产品定义和核心系统实现，主要工作包括：
-
-- **产品与架构**：定义从 public voice 到证据、研究、评审和决策产物的端到端合同，拆分 API、Worker、事实层和前端职责。
-- **数据采集**：封装多平台采集与标准化管线，处理查询预算、去重、评论分页、浏览器会话和可追溯数据日志。
-- **Agent Runtime**：实现 AutomationRun 状态机、候选任务编排、阶段预算、超时取消、失败重试、暂停恢复和过程事件流。
-- **Agentic RAG**：实现 FTS/向量并行召回、RRF、BGE Reranker、来源组去重、evidence-fit 和离线评测闭环。
-- **Agentic DeepResearch**：实现研究规划、网页安全读取、证据缺口反思、补充检索、引用闭合和带引用报告生成。
-- **多 Agent 评审**：实现固定专家与动态领域专家的证据请求、两轮讨论、反证检查、分歧审阅和结构化评分。
-- **后端与数据**：使用 FastAPI、PostgreSQL/pgvector、SSE/NDJSON 和独立 Worker 建设 API、事实源、任务状态与流式查询链路。
-- **前端与部署**：实现 Next.js 研究工作台、证据回放和决策产物页面，并通过 Docker Compose、Nginx 与 GitHub Actions 完成发布和验收。
-- **测试与评测**：建设检索锁定集、人工双标签评测、真实全链运行、回归测试与运行时性能归因。
+采集与模型能力使用第三方组件和服务；个人贡献集中在系统合同、执行编排、证据处理、产品集成及评测。
 
 ## 技术栈
 
-`Python` · `FastAPI` · `PostgreSQL 16` · `pgvector` · `BGE-M3` · `BGE Reranker` · `Next.js` · `Playwright` · `SSE / NDJSON` · `Docker Compose` · `Nginx` · `GitHub Actions`
+| 层次 | 技术 |
+| --- | --- |
+| 执行与后端 | Python、自研 HTTP API、独立 Worker、类型化 Schema 合同 |
+| 数据与检索 | PostgreSQL 16、pgvector、FTS、BGE-M3、BGE Reranker、RRF |
+| 前端与交互 | TypeScript、Next.js / React、SSE / NDJSON |
+| 采集与交付 | Playwright、Docker Compose、Nginx、GitHub Actions |
 
-## 公开边界
+## 阅读与演示
 
-- 本仓库不包含生产源码、原始平台数据、Cookie、API Key、Prompt、数据库快照或部署地址。
-- 图片中的内容用于说明产品交互和工程设计，不授权作为数据集或生产素材再分发。
-- 如需了解实现细节，可从[系统架构](docs/architecture.md)和[评测说明](docs/evaluation.md)开始；面试中可进一步演示私有仓库中的代码与原始评测报告。
+建议先看[界面导览](docs/demo.md)，再从[架构](docs/architecture.md)理解执行边界；[评测](docs/evaluation.md)说明结果能证明什么，[工程案例](docs/engineering-notes.md)记录真实失败和修正思路。全部资料入口见[文档索引](docs/README.md)。
+
+源码、内置 Prompt、原始数据、账号凭据、数据库快照和部署配置均保持私有。面试中的实现说明可联系作者预约。
+
+**高明 · Ming Gao｜Agent 开发 / 大模型应用开发｜[GitHub](https://github.com/gaoming-a)｜[1600064289@qq.com](mailto:1600064289@qq.com)**

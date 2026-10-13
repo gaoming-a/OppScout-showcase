@@ -1,121 +1,115 @@
-# OppScout 系统架构
+# 系统架构与实现边界
 
-## 设计目标
+[项目首页](../README.md) · [文档索引](README.md) · [工程案例](engineering-notes.md)
 
-OppScout 解决的不是“把搜索结果总结一下”，而是把早期方向研究组织成一条可恢复、可评测、可审计的 Agent 工作流。系统设计围绕四个约束展开：
+核对日期：2026-10-13。以下描述当前开发版本的逻辑架构；已部署的历史版本与本地开发验收分别记录。
 
-1. **事实和推断分离**：平台内容、网页快照和数据库记录构成事实层；Agent 只能引用事实层中存在的证据。
-2. **排序和准入分离**：RRF 与 Reranker 优化候选排序，deterministic evidence-fit 决定哪些证据可以进入研究和评分。
-3. **研究和决策分离**：DeepResearch 负责闭合研究问题，专家评审与确定性规则负责评分和产物类型。
-4. **过程和终态同时可追溯**：运行事件、查询、来源、证据、专家发言和最终产物都绑定稳定 ID。
-
-## 逻辑架构
-
-![OppScout 系统地图](../assets/system-map.png)
+## 系统如何运行
 
 ```mermaid
 flowchart TB
-    subgraph Surface["Next.js Research Workbench"]
-        UI1["研究任务"]
-        UI2["过程时间流"]
-        UI3["DeepResearch 文档"]
-        UI4["证据回放"]
-        UI5["决策产物"]
-    end
-
-    subgraph Control["FastAPI Control Plane"]
-        API["HTTP / SSE / NDJSON API"]
-        RUN["AutomationRun State Machine"]
-        REPORT["Reporting Projection"]
-    end
-
-    subgraph Runtime["Worker / Agent Runtime"]
-        PLAN["Intent & Retrieval Planner"]
-        COLLECT["Collector Orchestrator"]
-        RETRIEVE["Hybrid Retrieval"]
-        RESEARCH["DeepResearch"]
-        EXPERTS["Expert Board"]
-        ARTIFACT["ProductSpec & Decision Artifact"]
-    end
-
-    subgraph Data["PostgreSQL Fact Layer"]
-        FACTS["Runs / Evidence / Reports / Cards"]
-        INDEX["FTS GIN + pgvector HNSW"]
-        MEMORY["Working State / Conversation / Explicit Memory"]
-    end
-
-    UI1 --> API
-    API --> RUN
-    RUN --> PLAN --> COLLECT --> RETRIEVE --> RESEARCH --> EXPERTS --> ARTIFACT
-    COLLECT --> FACTS
-    FACTS --> INDEX
-    RETRIEVE <--> INDEX
-    RESEARCH --> FACTS
-    EXPERTS --> FACTS
-    ARTIFACT --> FACTS
-    RUN <--> MEMORY
-    FACTS --> REPORT --> API
-    API --> UI2
-    API --> UI3
-    API --> UI4
-    API --> UI5
+    UI["Next.js 研究工作台 / 统一对话"] --> API["Python HTTP API<br/>认证、owner、输入合同"]
+    API --> CALL["类型化 Tool Invocation<br/>输入快照、幂等与任务绑定"]
+    CALL --> OW["机会研究 Worker"]
+    CALL --> PW["舆情研究 Worker"]
+    CALL --> EW["专家蒸馏 Worker"]
+    OW --> RESEARCH["混合检索 / DeepResearch / 四角色评审"]
+    PW --> OPINION["公开样本检索 / 时效校验 / 引用报告"]
+    EW --> STYLE["原文观察 / 风格编译 / 自动评测"]
+    RESEARCH --> DB["PostgreSQL<br/>运行、证据、报告、资产与对话"]
+    OPINION --> DB
+    STYLE --> DB
+    HC["Harness 控制存储<br/>checkpoint / event / 稳定调用标识"] <--> OW
+    HC <--> PW
+    DB --> VIEW["持久化状态与产物投影"]
+    VIEW --> API
+    API --> UI
 ```
 
-## 运行状态与恢复
+后端当前使用 Python 标准库 HTTP Server 和自研请求处理器。API 接收指令、检查身份与输入、读取持久化投影；独立 Worker 负责长任务。网页连接负责展示进度，任务执行不依赖用户持续打开页面。
 
-`AutomationRun` 是控制面的权威状态。API 只接收命令和投影状态，独立 Worker 领取任务并持有执行所有权。任务领取使用 lease、version 和 fencing token，避免多个 Worker 同时提交同一个阶段的结果。
+Harness 不替代机会研究、舆情研究与专家资产各自的业务状态。当前控制事实已接入机会检索、候选分析和舆情执行的部分恢复边界；专家蒸馏继续使用自身的冻结执行合同与恢复规则。
+
+## Runtime：谁执行，何时可以继续
+
+| 边界 | 当前处理 |
+| --- | --- |
+| 执行所有权 | Worker 使用持久化租约和 fencing token；结果写入前检查 owner、当前租约和有效期 |
+| 任务重入 | 工具请求固定输入、版本与幂等标识，避免同一请求再次创建不同业务任务 |
+| 阶段恢复 | 部分阶段记录 checkpoint / event 和稳定外部调用标识；只有确认的完成事实可以复用 |
+| 外部调用结果未知 | 保存未知状态并停止自动重放，不能把请求超时当成“没有执行” |
+| 并发与超时 | 普通模型与流式调用受进程内在途门限制；超时候选在原执行真正结束前仍占容量 |
+| 预算与取消 | 现有业务服务分别执行时间、查询和 token 约束；同会话只允许一个活动回复流 |
+
+在已实现的 PostgreSQL 切片中，业务状态与成对控制事实受同一个事务和租约检查保护。租约使用数据库时钟，并在等待行锁后再次检查有效期，避免等待期间过期的 Worker 获得写入权。
+
+进程内模型并发门不等于平台全局配额；部分阶段恢复也不等于所有模型与外部工具调用都能安全重试。
+
+## Tool 与 Skill：扩展能力的合同
+
+- **Tool** 描述一项可执行能力的类型、必要输入、任务类型和产物入口。
+- **Skill** 描述版本化目标、输入输出合同、允许能力和停止条件；执行快照固定内容指纹。
+- **业务 Run** 保存各类研究的正式进度、结果和质量门。
+- **Harness 控制事实** 保存调用、attempt、checkpoint 和 event 的身份及关系。
+
+统一对话已经可以创建类型化机会研究、舆情研究和专家蒸馏任务。各工具的完整创建、停止、恢复接口尚未全部收敛到统一 Adapter。
+
+## RAG：召回、排序、准入
 
 ```mermaid
-stateDiagram-v2
-    [*] --> queued
-    queued --> running: worker claim
-    running --> paused: user stop / controlled pause
-    paused --> running: resume
-    running --> retrying: typed failure + retryable
-    retrying --> running: fresh stage attempt
-    running --> completed: artifact gates passed
-    running --> failed: non-retryable / budget exhausted
-    running --> stopped: explicit user stop
-    completed --> [*]
-    failed --> [*]
-    stopped --> [*]
+flowchart LR
+    Q["研究问题与证据请求"] --> F["PostgreSQL FTS"]
+    Q --> V["BGE-M3 / pgvector"]
+    F --> R["RRF + 来源组去重"]
+    V --> R
+    R --> B["BGE Reranker"]
+    B --> A["证据准入检查"]
+    A --> E["可引用证据包"]
 ```
 
-关键实现边界：
+FTS 与向量召回使用独立数据库连接并行执行。RRF 合并名次，Reranker 改善候选排序，证据准入另行检查主题、人群、场景、来源类型和权威性。同一原始文章或视频的多个片段归入同一来源组。
 
-- 每个阶段在写入证据、报告、评分和产品卡前检查 deadline/cancel。
-- 失败被记录为 typed semantic/runtime failure，不用看似合理的文本静默替代失败结果。
-- DeepResearch 重试重新执行当前研究阶段，不把旧结果伪装成本轮证据。
-- 完成态结果写入 PostgreSQL，API/Worker 重启不会复制产品卡或回退 state version。
-- SSE/NDJSON 只负责增量展示；只有持久化终态才被视为成功。
+排序靠前不代表有资格支撑结论。网页搜索摘要仅用于发现来源；正文读取、证据绑定与引用检查负责研究中实际使用的资料。具体指标见[评测说明](evaluation.md)。
 
-## Agentic RAG
+## 三种业务路径
 
-线上检索链路固定为：
+### 机会研究
 
-1. PostgreSQL 中文 FTS 与 BGE-M3/pgvector HNSW 使用独立连接并行召回。
-2. rank-only RRF 合并两路名次，按 canonical source group 组织 Top-50。
-3. `BAAI/bge-reranker-v2-m3` 对 Top-50 重排并输出 Top-10。
-4. deterministic evidence-fit 检查来源类型、主题、人群、场景、权威性和领域锚点。
-5. 未通过 fit 的候选保留审计原因，但不能进入后续证据包。
+研究方向 → 意图与检索计划 → 公开信号与候选 → 项目领域校准 → Claim–Evidence 矩阵 → DeepResearch → 正式产品规格 → 需求 / 市场 / 供给 / 合规评审 → 决策产物。
 
-这样可以明确回答三个不同问题：是否召回了候选、是否把候选排到前面、候选是否有资格支撑结论。
+当前在线主流程使用项目校准与固定四角色评审。定制专家的离线蒸馏和审核不再作为每个候选都必须等待的前置步骤。
 
-## DeepResearch 与专家评审
+结论分为产品机会、继续验证和不建议推进；缺少证据会保留为待验证项，不自动解释成反证。
 
-DeepResearch 以 evidence request 为输入，执行计划、搜索、安全读取、发现抽取、覆盖反思和补检。网页搜索 snippet 只表示 `discovered`；只有正文读取成功、形成快照和 citation 后才能进入核心证据。
+### 舆情研究
 
-研究完成后：
+从 owner 所属对话的类型化工具调用创建，冻结检索时效窗口，按公开样本形成报告。报告结论与主题绑定实际证据 ID，保留样本数量、时间及来源范围。
 
-- 固定需求、市场、供给、合规专家各自对自己的维度负责。
-- 每个候选还绑定一名经过评测和审核的领域专家；没有可复用专家时先执行专家蒸馏与质量门。
-- 专家基于同一个正式 ProductSpec 和闭合证据进行两轮讨论，输出 claim、反证、风险和结构化评分。
-- 机会潜力、证据置信度和产物类型经过确定性门禁，最终输出产品机会、继续验证或不建议推进之一。
+这条路径不进行产品机会评分，检索到的样本也不能直接代表全网总体。
 
-## 工程化边界
+### 风格专家
 
-- API、Worker、PostgreSQL、BGE 服务和 Web 在 Compose 中独立运行。
-- 只有 Nginx 暴露 80/443；数据库、检索服务和 Worker 保持内部可见。
-- 浏览器采集运行在容器/服务器，Cookie 与运行时浏览器目录不进入 Git。
-- GitHub Actions 执行构建、迁移、备份恢复检查、健康检查和发布后验证。
-- 测试覆盖状态机、检索、证据拟合、引用闭合、专家合同、决策产物、PostgreSQL 集成和浏览器关键链路。
+原文与 URL → 来源读取与观察 → 表达 / 互动覆盖检查 → 程序编译风格规则 → 基线 / 加载后三轮对话评测 → 私有待审核资产。
+
+语料原文和证据保留用于审计；直接对话使用可迁移的风格规则。领域知识通过单独范围授权和知识检索提供，风格规则不能添加事实、改写用户题设或扩大工具权限。无证据的价值观、判断及情绪规则不会被补成“完整人格”。
+
+## 多用户与交互
+
+- 已实现邮箱注册、登录、退出、会话续期、邮箱验证和密码找回；未验证账号只允许认证操作。
+- 首次注册支持当前设备匿名历史归属迁移，业务数据按 owner 校验，列表查询先隔离再分页。
+- 系统维护任务与普通用户任务使用不同身份边界。
+- 登录状态切换中止旧流并清理旧身份缓存；SSE / NDJSON 提供真实增量，持久化完成态才是正式结果。
+
+这些改动有本地与数据库合同验证，不据此宣称最新开发版本已经完成公网多用户发布或容量验收。
+
+## 当前完成范围与下一阶段
+
+| 已落地 | 尚待完成 |
+| --- | --- |
+| 统一能力描述、Skill 快照、类型化调用 | 完整 Tool Adapter 生命周期 |
+| 通用 checkpoint / event 控制存储 | 所有业务阶段及外部调用的恢复与对账 |
+| PostgreSQL 舆情与机会研究部分原子恢复切片 | Harness 统一预算与跨进程配额 |
+| 各业务正式产物与证据追溯 | 统一 Artifact Graph 与扩展治理 |
+| 本地回归、隔离数据库和指定真实模型验收 | 最新版本完整 CI、人工审核与相应部署验收 |
+
+后续沿现有合同推进，逐阶段验证；本展示不会把路线图描述为已实现功能。
